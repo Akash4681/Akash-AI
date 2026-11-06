@@ -1,0 +1,73 @@
+name: Build AKASH AI Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '*.zip'
+      - '.github/workflows/build-apk.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Extract project ZIP
+        run: |
+          mkdir extracted
+          unzip -q AKASH_NATASHA_AI_HERMES_CONNECTED_PROJECT.zip -d extracted
+          PROJECT_DIR="$(dirname "$(find extracted -type f -name package.json -not -path '*/node_modules/*' -print -quit)")"
+          if [ ! -f "$PROJECT_DIR/package.json" ]; then
+            echo "Project package.json not found"
+            exit 1
+          fi
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+        working-directory: ${{ env.PROJECT_DIR }}
+
+      - name: Build web app
+        run: npm run build
+        working-directory: ${{ env.PROJECT_DIR }}
+
+      - name: Prepare Android project
+        run: |
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+        working-directory: ${{ env.PROJECT_DIR }}
+
+      - name: Build debug APK
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew assembleDebug
+        working-directory: ${{ env.PROJECT_DIR }}
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AKASH-NATASHA-Android-APK
+          path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
