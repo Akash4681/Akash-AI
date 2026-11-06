@@ -1,0 +1,48 @@
+name: Build APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack project.zip
+        run: '[ -f project.zip ] && unzip -o project.zip || true'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - run: npm install
+      - run: npx cap add android
+      - name: SAFE build
+        run: |
+          python3 native/patch_manifest.py safe
+          npx cap sync android
+          cd android && chmod +x gradlew && ./gradlew assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk ../safe.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: akash-natasha-SAFE
+          path: safe.apk
+      - name: FULL build
+        id: full
+        continue-on-error: true
+        run: |
+          D=android/app/src/main/java/com/akashnatasha/app
+          cp native/*.java $D/
+          mkdir -p android/app/src/main/res/xml
+          cp native/accessibility_service_config.xml android/app/src/main/res/xml/
+          cp native/a11y.xml android/app/src/main/res/values/
+          python3 native/patch_manifest.py full
+          cd android && ./gradlew assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk ../full.apk
+      - if: steps.full.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: akash-natasha-FULL
+          path: full.apk
