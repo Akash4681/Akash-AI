@@ -1,0 +1,48 @@
+name: Build Stonic Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+
+    - name: Install Project Dependencies
+      run: |
+        npm install
+
+    - name: Build Web Assets
+      run: |
+        mkdir -p dist
+        echo '<!DOCTYPE html><html><head><title>Stonic AI - Akash & Natasha</title><style>body{background:#0a0a0c;color:#00ffcc;font-family:sans-serif;text-align:center;padding-top:50px;}</style></head><body><h1>Stonic AI (Android Core)</h1><p>Akash & Natasha Systems Initialized.</p></body></html>' > dist/index.html
+
+    - name: Add Capacitor Android & Build APK
+      run: |
+        npx cap init StonicAI com.stonic.android --web-dir dist --yes
+        npx cap add android
+        cd android
+        chmod +x gradlew
+        ./gradlew assembleDebug
+
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: stonic-app-debug
+        path: android/app/build/outputs/apk/debug/app-debug.apk
