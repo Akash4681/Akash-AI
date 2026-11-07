@@ -1,0 +1,90 @@
+name: Build AKASH AI NATASHA AI APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Extract project ZIP
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -f package.json ]; then
+            ZIP=$(find . -maxdepth 2 -type f -iname '*.zip' \
+              ! -name '*apk*' | head -n 1)
+
+            if [ -z "$ZIP" ]; then
+              echo "ERROR: Project ZIP not found"
+              exit 1
+            fi
+
+            mkdir -p /tmp/akash-source
+            unzip -oq "$ZIP" -d /tmp/akash-source
+
+            SOURCE=$(find /tmp/akash-source \
+              -type f -name package.json \
+              -not -path '*/node_modules/*' \
+              -print -quit)
+
+            if [ -z "$SOURCE" ]; then
+              echo "ERROR: package.json not found in ZIP"
+              exit 1
+            fi
+
+            cp -a "$(dirname "$SOURCE")"/. .
+          fi
+
+          test -f package.json
+          test -f capacitor.config.json
+          test -f www/index.html
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Prepare Android project
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+
+          npx cap sync android
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AKASH-NATASHA-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
