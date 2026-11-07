@@ -1,3 +1,4 @@
+
 name: Build APK
 on:
   workflow_dispatch:
@@ -19,17 +20,13 @@ jobs:
           java-version: 17
       - run: npm install
       - run: npx cap add android
-      - name: SAFE build
+      - name: Basic build
         run: |
           python3 native/patch_manifest.py safe
           npx cap sync android
           cd android && chmod +x gradlew && ./gradlew assembleDebug
           cp app/build/outputs/apk/debug/app-debug.apk ../safe.apk
-      - uses: actions/upload-artifact@v4
-        with:
-          name: akash-natasha-SAFE
-          path: safe.apk
-      - name: FULL build
+      - name: Full build
         id: full
         continue-on-error: true
         run: |
@@ -41,8 +38,10 @@ jobs:
           python3 native/patch_manifest.py full
           cd android && ./gradlew assembleDebug
           cp app/build/outputs/apk/debug/app-debug.apk ../full.apk
-      - if: steps.full.outcome == 'success'
-        uses: actions/upload-artifact@v4
+      - name: Pick the best APK
+        run: |
+          if [ -f full.apk ]; then cp full.apk akash-natasha.apk; else cp safe.apk akash-natasha.apk; fi
+      - uses: actions/upload-artifact@v4
         with:
-          name: akash-natasha-FULL
-          path: full.apk
+          name: akash-natasha
+          path: akash-natasha.apk
