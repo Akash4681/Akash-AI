@@ -118,34 +118,38 @@ jobs:
 
           npx cap sync android
 
-      - name: Install native source files
-        shell: bash
-        run: |
+            - name: Install native source files
+          shell: bash
+          run: |
           set -euo pipefail
 
           DEST="android/app/src/main/java/com/akashnatasha/app"
-          mkdir -p "$DEST"
+          RES="android/app/src/main/res"
+
+          mkdir -p "$DEST" "$RES/xml" "$RES/values"
 
           if [ -d native ]; then
             find native -maxdepth 1 -name '*.java' \
               -exec cp {} "$DEST/" \;
           fi
 
+          cat > "$RES/values/a11y_strings.xml" <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="a11y_label">AKASH AI Accessibility Service</string>
+          </resources>
+          EOF
+
+          cat > "$RES/xml/accessibility_service_config.xml" <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <accessibility-service
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              android:accessibilityEventTypes="typeAllMask"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:notificationTimeout="100"
+              android:canRetrieveWindowContent="false" />
+          EOF
+
           if [ -f native/patch_manifest.py ]; then
             python3 native/patch_manifest.py full
           fi
-
-      - name: Build debug APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd android
-          chmod +x gradlew
-          ./gradlew --no-daemon assembleDebug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: akash-natasha-apk
-          path: android/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
