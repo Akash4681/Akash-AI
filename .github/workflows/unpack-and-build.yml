@@ -153,3 +153,26 @@ jobs:
           if [ -f native/patch_manifest.py ]; then
             python3 native/patch_manifest.py full
           fi
+
+        
+               - name: Build debug APK
+          shell: bash
+          run: |
+          set -euo pipefail
+          cd android
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: akash-natasha-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error 
+
+
+
+
+
+
+
