@@ -1,47 +1,151 @@
+name: Build AKASH AI Android APK
 
-name: Build APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
 jobs:
-  apk:
+  build-apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Unpack project.zip
-        run: '[ -f project.zip ] && unzip -o project.zip || true'
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract and locate project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p .source-unpack
+
+          if [ -f package.json ]; then
+            echo "Project files already exist."
+          else
+            ZIP=""
+
+            for f in \
+              AKASH_AI_NATASHA_UPDATED.zip \
+              AKASH_AI_NATASHA_FINAL.zip \
+              AKASH_AI_v4_Combined.zip \
+              project.zip \
+              akash-natasha.zip
+            do
+              if [ -f "$f" ]; then
+                ZIP="$f"
+                break
+              fi
+            done
+
+            if [ -z "$ZIP" ]; then
+              ZIP="$(find . -maxdepth 1 -type f \
+                -iname '*.zip' -print -quit)"
+            fi
+
+            if [ -z "$ZIP" ]; then
+              echo "ERROR: Project ZIP not found."
+              exit 1
+            fi
+
+            echo "Extracting: $ZIP"
+            python3 - "$ZIP" <<'PY'
+          import sys
+          import zipfile
+          from pathlib import PurePosixPath
+
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              for item in z.infolist():
+                  p = PurePosixPath(item.filename)
+                  if p.is_absolute() or ".." in p.parts:
+                      raise SystemExit("Unsafe ZIP path: " + item.filename)
+              z.extractall(".source-unpack")
+          PY
+
+            ROOT="$(find .source-unpack \
+              -name package.json -type f \
+              -not -path '*/node_modules/*' \
+              -print -quit | xargs -r dirname)"
+
+            if [ -z "$ROOT" ]; then
+              echo "ERROR: package.json was not found inside the ZIP."
+              echo "ZIP contents:"
+              find .source-unpack -maxdepth 4 -type f | head -100
+              exit 1
+            fi
+
+            echo "Project directory: $ROOT"
+            cp -a "$ROOT"/. .
+          fi
+
+          test -f package.json
+          test -f www/index.html
+          test -f capacitor.config.json
+
+          echo "Project files located successfully."
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 20
-      - uses: actions/setup-java@v4
+          node-version: 22
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
-      - run: npm install
-      - run: npx cap add android
-      - name: Basic build
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run available tests
+        run: npm run test --if-present
+
+      - name: Prepare Android project
+        shell: bash
         run: |
-          python3 native/patch_manifest.py safe
+          set -euo pipefail
+
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+
           npx cap sync android
-          cd android && chmod +x gradlew && ./gradlew assembleDebug
-          cp app/build/outputs/apk/debug/app-debug.apk ../safe.apk
-      - name: Full build
-        id: full
-        continue-on-error: true
+
+      - name: Install native source files
+        shell: bash
         run: |
-          D=android/app/src/main/java/com/akashnatasha/app
-          cp native/*.java $D/
-          mkdir -p android/app/src/main/res/xml
-          cp native/accessibility_service_config.xml android/app/src/main/res/xml/
-          cp native/a11y.xml android/app/src/main/res/values/
-          python3 native/patch_manifest.py full
-          cd android && ./gradlew assembleDebug
-          cp app/build/outputs/apk/debug/app-debug.apk ../full.apk
-      - name: Pick the best APK
+          set -euo pipefail
+
+          DEST="android/app/src/main/java/com/akashnatasha/app"
+          mkdir -p "$DEST"
+
+          if [ -d native ]; then
+            find native -maxdepth 1 -name '*.java' \
+              -exec cp {} "$DEST/" \;
+          fi
+
+          if [ -f native/patch_manifest.py ]; then
+            python3 native/patch_manifest.py full
+          fi
+
+      - name: Build debug APK
+        shell: bash
         run: |
-          if [ -f full.apk ]; then cp full.apk akash-natasha.apk; else cp safe.apk akash-natasha.apk; fi
-      - uses: actions/upload-artifact@v4
+          set -euo pipefail
+          cd android
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
-          name: akash-natasha
-          path: akash-natasha.apk
+          name: akash-natasha-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
