@@ -154,10 +154,9 @@ jobs:
             python3 native/patch_manifest.py full
           fi
 
-        
-               - name: Build debug APK
-          shell: bash
-          run: |
+      - name: Build debug APK
+        shell: bash
+        run: |
           set -euo pipefail
           cd android
           chmod +x gradlew
@@ -168,7 +167,7 @@ jobs:
         with:
           name: akash-natasha-apk
           path: android/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error 
+          if-no-files-found: error
 
 
 
