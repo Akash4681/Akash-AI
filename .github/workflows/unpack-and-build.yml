@@ -118,9 +118,9 @@ jobs:
 
           npx cap sync android
 
-            - name: Install native source files
-          shell: bash
-          run: |
+      - name: Install native source files
+        shell: bash
+        run: |
           set -euo pipefail
 
           DEST="android/app/src/main/java/com/akashnatasha/app"
