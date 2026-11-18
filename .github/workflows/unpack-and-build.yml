@@ -1,11 +1,9 @@
-name: Build AKASH AI Android APK
+name: Build AKASH AI + NATASHA AI APK
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
-      - master
+    branches: [main, master]
 
 permissions:
   contents: read
@@ -13,82 +11,61 @@ permissions:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract and locate project
+      - name: Find or extract Android project
         shell: bash
         run: |
           set -euo pipefail
 
-          mkdir -p .source-unpack
-
-          if [ -f package.json ]; then
-            echo "Project files already exist."
+          if [[ -f package.json && -f www/index.html && -f capacitor.config.json ]]; then
+            echo "Project source already exists in repository root."
           else
-            ZIP=""
-
-            for f in \
-              AKASH_AI_NATASHA_UPDATED.zip \
-              AKASH_AI_NATASHA_FINAL.zip \
-              AKASH_AI_v4_Combined.zip \
-              project.zip \
-              akash-natasha.zip
-            do
-              if [ -f "$f" ]; then
-                ZIP="$f"
-                break
-              fi
+            ZIP_FILE=""
+            for f in project.zip AKASH_AI_NATASHA_UPDATED.zip AKASH_AI_NATASHA_INTERFACE_FIX.zip AKASH_AI_NATASHA_FINAL.zip akash-natasha.zip; do
+              if [[ -f "$f" ]]; then ZIP_FILE="$f"; break; fi
             done
 
-            if [ -z "$ZIP" ]; then
-              ZIP="$(find . -maxdepth 1 -type f \
-                -iname '*.zip' -print -quit)"
-            fi
-
-            if [ -z "$ZIP" ]; then
-              echo "ERROR: Project ZIP not found."
+            if [[ -z "$ZIP_FILE" ]]; then
+              echo "ERROR: No project ZIP found."
+              find . -maxdepth 2 -type f
               exit 1
             fi
 
-            echo "Extracting: $ZIP"
-            python3 - "$ZIP" <<'PY'
-          import sys
-          import zipfile
+            mkdir -p .build-source
+
+            python3 - "$ZIP_FILE" <<'PY'
+          import sys, zipfile
           from pathlib import PurePosixPath
 
           with zipfile.ZipFile(sys.argv[1]) as z:
-              for item in z.infolist():
-                  p = PurePosixPath(item.filename)
-                  if p.is_absolute() or ".." in p.parts:
-                      raise SystemExit("Unsafe ZIP path: " + item.filename)
-              z.extractall(".source-unpack")
+              for info in z.infolist():
+                  p = PurePosixPath(info.filename)
+                  if p.is_absolute() or '..' in p.parts:
+                      raise SystemExit(f'Unsafe path: {info.filename}')
+                  z.extract(info, '.build-source')
           PY
 
-            ROOT="$(find .source-unpack \
-              -name package.json -type f \
-              -not -path '*/node_modules/*' \
-              -print -quit | xargs -r dirname)"
+            ROOT="$(find .build-source -type f -name package.json -not -path '*/node_modules/*' -print -quit | xargs -r dirname)"
 
-            if [ -z "$ROOT" ]; then
-              echo "ERROR: package.json was not found inside the ZIP."
-              echo "ZIP contents:"
-              find .source-unpack -maxdepth 4 -type f | head -100
+            if [[ -z "$ROOT" ]]; then
+              echo "ERROR: ZIP does not contain package.json."
               exit 1
             fi
 
-            echo "Project directory: $ROOT"
             cp -a "$ROOT"/. .
           fi
 
-          test -f package.json
-          test -f www/index.html
-          test -f capacitor.config.json
-
-          echo "Project files located successfully."
+          for f in package.json www/index.html capacitor.config.json native/MainActivity.java native/PhoneControlPlugin.java native/PhoneControlService.java native/patch_manifest.py; do
+            if [[ ! -f "$f" ]]; then
+              echo "ERROR: Required file missing: $f"
+              exit 1
+            fi
+          done
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -99,79 +76,67 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17'
 
-      - name: Install dependencies
+      - name: Install Node dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Run available tests
-        run: npm run test --if-present
+      - name: Run project tests
+        run: npm test
 
-      - name: Prepare Android project
+      - name: Generate Android project
+        run: npx cap add android
+
+      - name: Sync Capacitor assets
+        run: npx cap sync android
+
+      - name: Install phone-control native files
         shell: bash
         run: |
           set -euo pipefail
-
-          if [ ! -d android ]; then
-            npx cap add android
-          fi
-
-          npx cap sync android
-
-      - name: Install native source files
-        shell: bash
-        run: |
-          set -euo pipefail
-
           DEST="android/app/src/main/java/com/akashnatasha/app"
-          RES="android/app/src/main/res"
+          test -d "$DEST"
 
-          mkdir -p "$DEST" "$RES/xml" "$RES/values"
+          cp native/PhoneControlPlugin.java native/PhoneControlService.java native/MainActivity.java "$DEST/"
 
-          if [ -d native ]; then
-            find native -maxdepth 1 -name '*.java' \
-              -exec cp {} "$DEST/" \;
-          fi
+          mkdir -p android/app/src/main/res/xml android/app/src/main/res/values
 
-          cat > "$RES/values/a11y_strings.xml" <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <string name="a11y_label">AKASH AI Accessibility Service</string>
-          </resources>
-          EOF
+          cp native/accessibility_service_config.xml android/app/src/main/res/xml/
+          cp native/a11y.xml android/app/src/main/res/values/a11y.xml
 
-          cat > "$RES/xml/accessibility_service_config.xml" <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <accessibility-service
-              xmlns:android="http://schemas.android.com/apk/res/android"
-              android:accessibilityEventTypes="typeAllMask"
-              android:accessibilityFeedbackType="feedbackGeneric"
-              android:notificationTimeout="100"
-              android:canRetrieveWindowContent="false" />
-          EOF
+          python3 native/patch_manifest.py full
 
-          if [ -f native/patch_manifest.py ]; then
-            python3 native/patch_manifest.py full
-          fi
+      - name: Verify native service registration
+        run: |
+          set -euo pipefail
+          grep -q 'PhoneControlPlugin.class' android/app/src/main/java/com/akashnatasha/app/MainActivity.java
+          grep -q '\.PhoneControlService' android/app/src/main/AndroidManifest.xml
+          grep -q 'accessibility_service_config' android/app/src/main/AndroidManifest.xml
 
       - name: Build debug APK
-        shell: bash
         run: |
           set -euo pipefail
           cd android
           chmod +x gradlew
-          ./gradlew --no-daemon assembleDebug
+          ./gradlew --no-daemon clean assembleDebug
+          mkdir -p ../dist
+          cp app/build/outputs/apk/debug/app-debug.apk ../dist/akash-natasha-full.apk
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: akash-natasha-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: akash-natasha-full-apk
+          path: dist/akash-natasha-full.apk
           if-no-files-found: error
+          retention-days: 14
 
-
-
-
-
-
-
+      - name: Upload build diagnostics if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akash-natasha-build-reports
+          path: |
+            android/app/build/reports/**
+            android/build/reports/**
+          if-no-files-found: ignore
+          retention-days: 7
